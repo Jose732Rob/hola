@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clasificador de Dígitos MNIST</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+        }
+        #canvas {
+            border: 1px solid #000;
+            margin: 20px auto;
+            display: block;
+            background-color: black;
+        }
+        button {
+            padding: 10px 15px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        #prediction {
+            font-size: 24px;
+            margin: 20px;
+            font-weight: bold;
+        }
+        .probabilities {
+            display: flex;
+            justify-content: center;
+            margin-top: 20px;
+        }
+        .prob-bar {
+            width: 30px;
+            margin: 0 5px;
+            background-color: #4CAF50;
+            text-align: center;
+            color: white;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Clasificador de Dígitos MNIST</h1>
+    <p>Dibuja un dígito (0-9) en el cuadro negro y haz clic en "Predecir"</p>
+    
+    <canvas id="canvas" width="280" height="280"></canvas>
+    
+    <div>
+        <button id="predictBtn">Predecir</button>
+        <button id="clearBtn">Limpiar</button>
+    </div>
+    
+    <div id="prediction">Predicción: </div>
+    
+    <div class="probabilities" id="probabilities"></div>
+    
+    <script>
+        // Variables globales
+        let model;
+        let canvas = document.getElementById('canvas');
+        let ctx = canvas.getContext('2d');
+        let isDrawing = false;
+        
+        // Cargar el modelo
+        async function loadModel() {
+            console.log("Cargando modelo...");
+            model = await tf.loadLayersModel('model.json');
+            console.log("Modelo cargado correctamente");
+        }
+        
+        // Inicializar el canvas
+        function initCanvas() {
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 20;
+            ctx.lineCap = 'round';
+            
+            canvas.addEventListener('mousedown', startDrawing);
+            canvas.addEventListener('mousemove', draw);
+            canvas.addEventListener('mouseup', stopDrawing);
+            canvas.addEventListener('mouseout', stopDrawing);
+            
+            // Soporte para pantallas táctiles
+            canvas.addEventListener('touchstart', handleTouch);
+            canvas.addEventListener('touchmove', handleTouch);
+            canvas.addEventListener('touchend', stopDrawing);
+        }
+        
+        function handleTouch(e) {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const mouseEvent = new MouseEvent(
+                e.type === 'touchstart' ? 'mousedown' : 'mousemove',
+                {
+                    clientX: touch.clientX,
+                    clientY: touch.clientY
+                }
+            );
+            canvas.dispatchEvent(mouseEvent);
+        }
+        
+        function startDrawing(e) {
+            isDrawing = true;
+            draw(e);
+        }
+        
+        function draw(e) {
+            if (!isDrawing) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            ctx.lineTo(x, y);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+        }
+        
+        function stopDrawing() {
+            isDrawing = false;
+            ctx.beginPath();
+        }
+        
+        // Preprocesar la imagen para el modelo
+        function preprocessImage() {
+            // Redimensionar a 28x28 (tamaño MNIST)
+            let tempCanvas = document.createElement('canvas');
+            tempCanvas.width = 28;
+            tempCanvas.height = 28;
+            let tempCtx = tempCanvas.getContext('2d');
+            
+            // Dibujar la imagen original en el canvas temporal
+            tempCtx.drawImage(canvas, 0, 0, 28, 28);
+            
+            // Obtener los datos de la imagen
+            let imgData = tempCtx.getImageData(0, 0, 28, 28);
+            
+            // Convertir a tensor y normalizar
+            let imgTensor = tf.browser.fromPixels(imgData, 1)
+                .toFloat()
+                .div(255.0)
+                .reshape([1, 28, 28, 1]);
+            
+            return imgTensor;
+        }
+        
+        // Hacer la predicción
+        async function predict() {
+            if (!model) {
+                alert("El modelo aún no se ha cargado. Por favor espera.");
+                return;
+            }
+            
+            let imgTensor = preprocessImage();
+            let predictions = await model.predict(imgTensor).data();
+            
+            // Obtener la predicción más alta
+            let maxIndex = 0;
+            let maxProb = predictions[0];
+            for (let i = 1; i < predictions.length; i++) {
+                if (predictions[i] > maxProb) {
+                    maxProb = predictions[i];
+                    maxIndex = i;
+                }
+            }
+            
+            // Mostrar resultados
+            document.getElementById('prediction').textContent = `Predicción: ${maxIndex} (${(maxProb * 100).toFixed(2)}%)`;
+            
+            // Mostrar barras de probabilidad
+            let probContainer = document.getElementById('probabilities');
+            probContainer.innerHTML = '';
+            
+            for (let i = 0; i < predictions.length; i++) {
+                let bar = document.createElement('div');
+                bar.className = 'prob-bar';
+                bar.style.height = `${predictions[i] * 100}px`;
+                bar.textContent = i;
+                probContainer.appendChild(bar);
+            }
+            
+            // Liberar memoria
+            imgTensor.dispose();
+        }
+        
+        // Limpiar el canvas
+        function clearCanvas() {
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            document.getElementById('prediction').textContent = 'Predicción: ';
+            document.getElementById('probabilities').innerHTML = '';
+        }
+        
+        // Inicializar la aplicación
+        window.onload = function() {
+            loadModel();
+            initCanvas();
+            
+            document.getElementById('predictBtn').addEventListener('click', predict);
+            document.getElementById('clearBtn').addEventListener('click', clearCanvas);
+        };
+    </script>
+</body>
+</html>
